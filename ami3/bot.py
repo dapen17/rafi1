@@ -29,7 +29,7 @@ bot_client = TelegramClient('bot_session', api_id, api_hash)
 
 # Variabel global untuk menghitung total sesi
 total_sessions = 0
-MAX_SESSIONS = 4  # Batas maksimal sesi (ubah menjadi 10)
+MAX_SESSIONS = 2  # Batas maksimal sesi (ubah menjadi 10)
 
 # Dictionary untuk menyimpan sesi pengguna sementara
 user_sessions = {}  # Struktur: {user_id: [{'client': TelegramClient, 'phone': str}]}
@@ -71,7 +71,7 @@ async def login(event):
                 if user_id not in user_sessions:
                     user_sessions[user_id] = []
                 user_sessions[user_id].append({"client": user_client, "phone": phone})
-                await event.reply(f"✅ Anda sudah login sebelumnya! Langsung terhubung sebagai {phone}.")
+                await event.reply(f"✅ Anda sudah login sebelumnya! Langsung terhubung sebagai {phone}., Format command bot cavy help")
                 await configure_event_handlers(user_client, user_id)
                 return
             else:
