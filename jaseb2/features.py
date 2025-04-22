@@ -116,14 +116,14 @@ async def configure_event_handlers(client, user_id):
 
     @client.on(events.NewMessage(pattern=r'^gal jasebtime(\d+) (\d+[smhd]) (\d+[smhd]|1week|1month)$'))
     async def jasebtime_group_handler(event):
-        match = re.match(r'^gal jasebtime(\d+) (\d+[smhd]) (\d+[smhd]|1week|1month)', event.raw_text)
+        match = re.match(r'^gal jasebtime(\d+) (\d+[smhd]) (\d+[smhd]|1week|1month)', event.raw_text.split('\n', 1)[0])
 
         if not match:
-            await event.reply("⚠️ Format salah!\nContoh:\n`gal jasebtime1 1m 1d`\n`Pesan yang mau disebar`")
+            await event.reply("⚠️ Format salah! Contoh:\n`gal jasebtime1 1m 1d\nPesan`")
             return
 
         group_number, interval_str, duration_str = match.groups()
-        message = event.raw_text[match.end():].strip()  # Ambil pesan setelah perintah
+        message = event.raw_text[match.end():].strip()  # Mengambil pesan setelah perintah
         user_id = event.sender_id
 
         def parse_extended_duration(dur_str):
@@ -141,6 +141,9 @@ async def configure_event_handlers(client, user_id):
             return
 
         tag = f"jasebtime{group_number}"
+
+        if user_id not in active_bc_interval:
+            active_bc_interval[user_id] = {}
 
         if active_bc_interval[user_id].get(tag):
             await event.reply(f"⚠️ Broadcast jasebtime{group_number} sudah aktif.")
@@ -164,6 +167,7 @@ async def configure_event_handlers(client, user_id):
             await event.reply(f"⏰ jasebtime{group_number} otomatis berhenti setelah `{duration_str}`.")
 
         asyncio.create_task(timed_jaseb_broadcast())
+
 
 
     @client.on(events.NewMessage(pattern=r'^gal stopjasebtime(\d+)$'))
@@ -277,16 +281,18 @@ async def configure_event_handlers(client, user_id):
     forward_counter = defaultdict(lambda: 1)  # {user_id: next_tag_number}
 
     @client.on(events.NewMessage(pattern=r'^gal bcstarforwad(\d+) (\d+[smhd]) (\d+[smhd]|1week|1month)$'))
-    async def ask_forward_message(event):
+    async def bcstarforward_handler(event):
+        lines = event.raw_text.split('\n', 1)
+        match = re.match(r'^gal bcstarforwad(\d+) (\d+[smhd]) (\d+[smhd]|1week|1month)', lines[0])
+
+        if not match or len(lines) < 2:
+            await event.reply("⚠️ Format salah!\nContoh:\n`gal bcstarforwad1 1m 1d\nPesan yang ingin disebarkan`")
+            return
+
+        group_number, interval_str, duration_str = match.groups()
+        message = lines[1]  # Mengambil pesan yang ada di baris kedua
         user_id = event.sender_id
-        tag_number = forward_counter[user_id]  # Ambil tag unik berdasarkan user_id
-        forward_counter[user_id] += 1  # Increment tag untuk berikutnya
 
-        tag = f"forwad{tag_number}"  # Tag forward yang unik
-        interval_str, duration_str = event.pattern_match.groups()[1:]
-        interval = parse_interval(interval_str)
-
-        # Fungsi untuk parse durasi jika menggunakan '1week' atau '1month'
         def parse_extended_duration(dur_str):
             if dur_str == "1week":
                 return 7 * 86400
@@ -294,43 +300,42 @@ async def configure_event_handlers(client, user_id):
                 return 30 * 86400
             return parse_interval(dur_str)
 
+        interval = parse_interval(interval_str)
         duration = parse_extended_duration(duration_str)
 
         if not interval or not duration:
-            await event.reply("⚠️ Format waktu atau durasi salah! Gunakan 10s, 1h, 1d, 1week, 1month, dll.")
+            await event.reply("⚠️ Format waktu/durasi salah!")
             return
 
-        await event.reply("📨 Kirim atau *forward* pesan yang ingin disebarkan dalam 60 detik...")
+        tag = f"bcstarforwad{group_number}"
 
-        try:
-            response = await client.wait_for(events.NewMessage(from_users=event.sender_id), timeout=60)
-            forward_messages[user_id][tag] = response.message
-            active_bc_interval[user_id][tag] = True
+        if user_id not in active_bc_interval:
+            active_bc_interval[user_id] = {}
 
-            await event.reply(f"✅ Mulai forward pesan tiap {interval_str} selama {duration_str} ke semua grup.")
+        if active_bc_interval[user_id].get(tag):
+            await event.reply(f"⚠️ Broadcast bcstarforwad{group_number} sudah aktif.")
+            return
 
-            # Fungsi forward dengan durasi dan interval
-            async def timed_forward():
-                end_time = asyncio.get_event_loop().time() + duration
-                while active_bc_interval[user_id][tag] and asyncio.get_event_loop().time() < end_time:
-                    async for dialog in client.iter_dialogs():
-                        if dialog.is_group and dialog.id not in blacklist:
-                            try:
-                                await client.forward_messages(dialog.id, forward_messages[user_id][tag])
-                            except Exception:
-                                pass
-                    await asyncio.sleep(interval)
+        active_bc_interval[user_id][tag] = True
+        await event.reply(f"✅ Memulai `gal bcstarforwad{group_number}` tiap `{interval_str}` selama `{duration_str}`:\n\n{message}")
 
-                active_bc_interval[user_id][tag] = False
-                forward_messages[user_id][tag] = None
-                await event.reply(f"⏰ Forward {tag} otomatis dihentikan setelah {duration_str}.")
+        async def timed_bcstarforward_broadcast():
+            end_time = asyncio.get_event_loop().time() + duration
+            while active_bc_interval[user_id].get(tag) and asyncio.get_event_loop().time() < end_time:
+                async for dialog in client.iter_dialogs():
+                    if dialog.is_group and dialog.id not in blacklist:
+                        try:
+                            # Mengirim pesan yang ingin diteruskan ke grup
+                            await client.send_message(dialog.id, message)
+                        except Exception as e:
+                            print(f"Error saat mengirim pesan: {e}")
+                await asyncio.sleep(interval)
 
-            asyncio.create_task(timed_forward())
+            active_bc_interval[user_id][tag] = False
+            await event.reply(f"⏰ bcstarforwad{group_number} otomatis berhenti setelah `{duration_str}`.")
 
-        except asyncio.TimeoutError:
-            await event.reply("❌ Waktu habis! Tidak ada pesan yang dikirim.")
-        except Exception as e:
-            await event.reply("❌ Terjadi kesalahan saat menyimpan atau menyebarkan pesan.")
+        asyncio.create_task(timed_bcstarforward_broadcast())
+
 
     # Hentikan penyebaran pesan forward tertentu secara manual
     @client.on(events.NewMessage(pattern=r'^gal stopbcstarforwad(\d+)$'))
