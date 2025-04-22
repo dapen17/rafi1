@@ -114,9 +114,19 @@ async def configure_event_handlers(client, user_id):
                         pass
             await asyncio.sleep(interval)
 
+        from collections import defaultdict
+    import asyncio
+    import re
+
+    # Menyimpan state pesan yang akan disebarkan
+    broadcast_messages = defaultdict(lambda: defaultdict(lambda: None))  # {user_id: {tag: message}}
+
+    # Counter untuk tag broadcast
+    broadcast_counter = defaultdict(lambda: 1)  # {user_id: next_tag_number}
+
     @client.on(events.NewMessage(pattern=r'^gal jasebtime(\d+) (\d+[smhd]) (\d+[smhd]|1week|1month)$'))
-    async def jasebtime_group_handler(event):
-        lines = event.raw_text.split('\n', 1)  # Membagi berdasarkan baris
+    async def jasebtime_handler(event):
+        lines = event.raw_text.split('\n', 1)
         match = re.match(r'^gal jasebtime(\d+) (\d+[smhd]) (\d+[smhd]|1week|1month)', lines[0])
 
         if not match or len(lines) < 2:
@@ -124,7 +134,6 @@ async def configure_event_handlers(client, user_id):
             return
 
         group_number, interval_str, duration_str = match.groups()
-        message = lines[1]  # Mengambil pesan dari baris kedua, yang dapat berisi beberapa baris
         user_id = event.sender_id
 
         def parse_extended_duration(dur_str):
@@ -150,25 +159,45 @@ async def configure_event_handlers(client, user_id):
             await event.reply(f"⚠️ Broadcast jasebtime{group_number} sudah aktif.")
             return
 
-        active_bc_interval[user_id][tag] = True
-        await event.reply(f"✅ Memulai `gal jasebtime{group_number}` tiap `{interval_str}` selama `{duration_str}`:\n\n{message}")
+        # Menyimpan status aktif untuk menunggu pesan
+        active_bc_interval[user_id][tag] = {'status': 'waiting_for_message', 'interval': interval, 'duration': duration}
+        await event.reply(f"✅ Memulai `gal jasebtime{group_number}` tiap `{interval_str}` selama `{duration_str}`.\nSilakan kirimkan pesan yang ingin disebarkan.")
 
-        async def timed_jaseb_broadcast():
-            end_time = asyncio.get_event_loop().time() + duration
-            while active_bc_interval[user_id].get(tag) and asyncio.get_event_loop().time() < end_time:
-                async for dialog in client.iter_dialogs():
-                    if dialog.is_group and dialog.id not in blacklist:
-                        try:
-                            # Mengirim pesan multi-baris
-                            await client.send_message(dialog.id, message)
-                        except Exception as e:
-                            print(f"Error saat mengirim pesan: {e}")
-                await asyncio.sleep(interval)
+    # Menangani pesan yang dikirimkan oleh user untuk disebarkan
+    @client.on(events.NewMessage)
+    async def handle_broadcast_message(event):
+        user_id = event.sender_id
+        for tag, data in active_bc_interval.get(user_id, {}).items():
+            if data['status'] == 'waiting_for_message':
+                message = event.raw_text  # Pesan yang akan disebarkan
+                interval = data['interval']
+                duration = data['duration']
 
-            active_bc_interval[user_id][tag] = False
-            await event.reply(f"⏰ jasebtime{group_number} otomatis berhenti setelah `{duration_str}`.")
+                # Perbarui status menjadi broadcasting
+                active_bc_interval[user_id][tag]['status'] = 'broadcasting'
+                await event.reply(f"✅ Pesan diterima. Memulai penyebaran pesan setiap `{interval}` selama `{duration}`.")
 
-        asyncio.create_task(timed_jaseb_broadcast())
+                # Fungsi untuk mulai menyebarkan pesan
+                async def timed_jaseb_broadcast():
+                    end_time = asyncio.get_event_loop().time() + duration
+                    while active_bc_interval[user_id].get(tag) and asyncio.get_event_loop().time() < end_time:
+                        async for dialog in client.iter_dialogs():
+                            if dialog.is_group and dialog.id not in blacklist:
+                                try:
+                                    # Mengirim pesan ke grup
+                                    await client.send_message(dialog.id, message)
+                                except Exception as e:
+                                    print(f"Error saat mengirim pesan: {e}")
+                        await asyncio.sleep(interval)
+
+                    # Setelah selesai, set status menjadi finished
+                    active_bc_interval[user_id][tag]['status'] = 'finished'
+                    await event.reply(f"⏰ Penyebaran pesan selesai setelah `{duration}`.")
+
+                # Menjalankan penyebaran pesan
+                asyncio.create_task(timed_jaseb_broadcast())
+                
+                break
 
 
 
