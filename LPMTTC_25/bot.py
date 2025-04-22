@@ -77,9 +77,9 @@ async def login(event):
             else:
                 await user_client.disconnect()
                 os.remove(session_file)  # Hapus sesi yang corrupt
-                await event.reply("⚠️ Sesi lama tidak valid, melakukan login ulang...")
+                await event.reply("⚠️ Sesi lama tidak valid, melakukan login ulang...tunggu beberapa detik")
         except errors.SessionPasswordNeededError:
-            await event.reply("⚠️ Sesi ini membutuhkan password. Silakan login ulang dengan OTP.")
+            await event.reply("⚠️ Sesi ini membutuhkan password. Silakan login ulang dengan OTP atau masukkan password.")
         except Exception as e:
             await event.reply(f"⚠️ Gagal menggunakan sesi lama: {e}. Login ulang diperlukan.")
             try:
@@ -115,7 +115,6 @@ async def verify(event):
         await event.reply("⚠️ Anda belum login. Gunakan perintah `/login` terlebih dahulu.")
         return
 
-    # Cek jika ada client aktif untuk user ini
     user_client = user_sessions[user_id][-1]["client"]
     phone = user_sessions[user_id][-1]["phone"]
 
@@ -123,8 +122,13 @@ async def verify(event):
         await user_client.sign_in(phone, code)
         await event.reply(f"✅ Verifikasi berhasil untuk nomor {phone}! Anda sekarang dapat menggunakan fitur.")
         await configure_event_handlers(user_client, user_id)
+    except errors.SessionPasswordNeededError:
+        await event.reply("⚠️ Kode OTP benar, tapi akun ini mengaktifkan verifikasi dua langkah (password).\n"
+                          "Silakan masukkan password Anda dengan perintah:\n"
+                          "`/password <password>`")
     except Exception as e:
         await event.reply(f"⚠️ Gagal memverifikasi kode untuk nomor {phone}: {e}")
+
 
 @bot_client.on(events.NewMessage(pattern='/logout (.+)'))
 async def logout(event):
@@ -199,6 +203,25 @@ async def help_command(event):
         "`/resetall` - Menghapus semua sesi.\n"
         "`/help` - Tampilkan daftar perintah."
     )
+
+@bot_client.on(events.NewMessage(pattern='/password (.+)'))
+async def password(event):
+    sender = await event.get_sender()
+    user_id = sender.id
+    password = event.pattern_match.group(1)
+
+    if user_id not in user_sessions or not user_sessions[user_id]:
+        await event.reply("⚠️ Anda belum login atau verifikasi OTP dulu. Gunakan perintah `/login` dan `/verify` terlebih dahulu.")
+        return
+
+    user_client = user_sessions[user_id][-1]["client"]
+    try:
+        await user_client.sign_in(password=password)
+        await event.reply("✅ Password berhasil diverifikasi! Login berhasil dan akun Anda sekarang aktif.")
+        await configure_event_handlers(user_client, user_id)
+    except Exception as e:
+        await event.reply(f"⚠️ Gagal verifikasi password: {e}")
+
 
 async def run_bot():
     while True:
