@@ -87,13 +87,28 @@ async def configure_event_handlers(client, user_id):
                 # Menangani error tanpa output log
                 pass
 
-    # Broadcast pesan hanya ke grup dengan interval tertentu
-    @client.on(events.NewMessage(pattern=r'^gal bcstargr(\d+) (\d+[smhd]) (.+)$'))
+    @client.on(events.NewMessage(pattern=r'^gal bcstargr(\d+) (\d+[smhd])'))
     async def broadcast_group_handler(event):
-        group_number = event.pattern_match.group(1)
-        interval_str, custom_message = event.pattern_match.groups()[1:]
-        interval = parse_interval(interval_str)
+        user_id = event.sender_id
+        lines = event.raw_text.split('\n')
+        
+        # Ambil argumen dari baris pertama
+        match = re.match(r'^gal bcstargr(\d+) (\d+[smhd])', lines[0])
+        if not match:
+            await event.reply("⚠️ Format perintah salah.")
+            return
 
+        group_number = match.group(1)
+        interval_str = match.group(2)
+
+        # Gabungkan semua baris setelah baris pertama jadi pesan
+        custom_message = '\n'.join(lines[1:]).strip()
+        
+        if not custom_message:
+            await event.reply("⚠️ Pesan tidak boleh kosong!")
+            return
+
+        interval = parse_interval(interval_str)
         if not interval:
             await event.reply("⚠️ Format waktu salah! Gunakan format 10s, 1m, 2h, dll.")
             return
@@ -103,16 +118,22 @@ async def configure_event_handlers(client, user_id):
             return
 
         active_bc_interval[user_id][f"group{group_number}"] = True
-        await event.reply(f"✅ Memulai broadcast ke grup {group_number} dengan interval {interval_str}: {custom_message}")
-        while active_bc_interval[user_id][f"group{group_number}"]:
-            async for dialog in client.iter_dialogs():
-                if dialog.is_group and dialog.id not in blacklist:
-                    try:
-                        await client.send_message(dialog.id, custom_message)
-                    except Exception as e:
-                        # Menangani error tanpa output log
-                        pass
-            await asyncio.sleep(interval)
+        await event.reply(f"✅ Memulai broadcast ke grup {group_number} setiap {interval_str}:\n\n{custom_message}")
+
+        try:
+            while active_bc_interval[user_id][f"group{group_number}"]:
+                async for dialog in client.iter_dialogs():
+                    if dialog.is_group and dialog.id not in blacklist:
+                        try:
+                            await client.send_message(dialog.id, custom_message)
+                        except Exception:
+                            pass
+                await asyncio.sleep(interval)
+        except Exception as e:
+            await event.reply(f"❌ Error saat broadcast: {e}")
+        finally:
+            active_bc_interval[user_id][f"group{group_number}"] = False
+
 
     @client.on(events.NewMessage(pattern=r'^gal jasebtime(\d+) (\d+[smhd]) (\d+[smhd]|1week|1month)$'))
     async def jasebtime_group_handler(event):
