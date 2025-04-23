@@ -378,20 +378,6 @@ async def configure_event_handlers(client, user_id):
             await event.reply(f"⚠️ Tidak ada penyebaran forward {tag} yang berjalan.")
 
 
-        # Atur auto-reply dengan multi-baris
-    @client.on(events.NewMessage(pattern=r'^gal setreply'))
-    async def set_auto_reply(event):
-        full_text = event.raw_text
-        lines = full_text.split('\n', 1)
-        
-        if len(lines) < 2:
-            await event.reply("⚠️ Format salah. Gunakan:\n`gal setreply <pesan>`\nPisahkan baris pertama dengan newline.")
-            return
-
-        reply_message = lines[1]  # Ambil semua teks setelah baris pertama
-        user_id = event.sender_id
-        auto_replies[user_id] = reply_message
-        await event.reply(f"✅ Auto-reply diatur:\n{reply_message}")
 
 
     # Menangani auto-reply
