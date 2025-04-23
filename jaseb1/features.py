@@ -135,73 +135,78 @@ async def configure_event_handlers(client, user_id):
             active_bc_interval[user_id][f"group{group_number}"] = False
 
 
-    @client.on(events.NewMessage(pattern=r'^gal jasebtime(\d+) (\d+[smhd]) (\d+[smhd]|1week|1month)$'))
-    async def jasebtime_group_handler(event):
-        match = re.match(r'^gal jasebtime(\d+) (\d+[smhd]) (\d+[smhd]|1week|1month)', event.raw_text.split('\n', 1)[0])
+    @client.on(events.NewMessage(pattern=r'^gal bctimergr(\d+) (\d+[smhd]) (\d+[smhd])'))
+    async def broadcast_timer_group_handler(event):
+        user_id = event.sender_id
+        lines = event.raw_text.split('\n')
 
+        # Parsing baris pertama untuk argumen
+        match = re.match(r'^gal bctimergr(\d+) (\d+[smhd]) (\d+[smhd])', lines[0])
         if not match:
-            await event.reply("⚠️ Format salah! Contoh:\n`gal jasebtime1 1m 1d\nPesan`")
+            await event.reply("⚠️ Format perintah salah.")
             return
 
-        group_number, interval_str, duration_str = match.groups()
-        message = event.raw_text[match.end():].strip()  # Mengambil pesan setelah perintah
-        user_id = event.sender_id
+        group_number = match.group(1)
+        interval_str = match.group(2)
+        duration_str = match.group(3)
 
-        def parse_extended_duration(dur_str):
-            if dur_str == "1week":
-                return 7 * 86400
-            elif dur_str == "1month":
-                return 30 * 86400
-            return parse_interval(dur_str)
+        # Gabungkan isi pesan setelah baris pertama
+        custom_message = '\n'.join(lines[1:]).strip()
+        if not custom_message:
+            await event.reply("⚠️ Pesan tidak boleh kosong!")
+            return
 
         interval = parse_interval(interval_str)
-        duration = parse_extended_duration(duration_str)
+        duration = parse_interval(duration_str)
 
         if not interval or not duration:
-            await event.reply("⚠️ Format waktu/durasi salah!")
+            await event.reply("⚠️ Format waktu salah! Gunakan format seperti 10s, 5m, 2h, 3d.")
             return
 
-        tag = f"jasebtime{group_number}"
-
-        if user_id not in active_bc_interval:
-            active_bc_interval[user_id] = {}
-
-        if active_bc_interval[user_id].get(tag):
-            await event.reply(f"⚠️ Broadcast jasebtime{group_number} sudah aktif.")
+        if active_bc_interval[user_id][f"timer_group{group_number}"]:
+            await event.reply(f"⚠️ Broadcast timer ke grup {group_number} sudah aktif.")
             return
 
-        active_bc_interval[user_id][tag] = True
-        await event.reply(f"✅ Memulai `gal jasebtime{group_number}` tiap `{interval_str}` selama `{duration_str}`:\n\n{message}")
+        active_bc_interval[user_id][f"timer_group{group_number}"] = True
+        await event.reply(f"✅ Memulai bctimergr{group_number}: setiap {interval_str}, selama {duration_str}.\n\n{custom_message}")
 
-        async def timed_jaseb_broadcast():
-            end_time = asyncio.get_event_loop().time() + duration
-            while active_bc_interval[user_id].get(tag) and asyncio.get_event_loop().time() < end_time:
+        start_time = asyncio.get_event_loop().time()
+
+        try:
+            while active_bc_interval[user_id][f"timer_group{group_number}"]:
+                now = asyncio.get_event_loop().time()
+                if now - start_time >= duration:
+                    await event.reply(f"🕒 Broadcast ke grup {group_number} otomatis dihentikan setelah {duration_str}.")
+                    break
+
                 async for dialog in client.iter_dialogs():
                     if dialog.is_group and dialog.id not in blacklist:
                         try:
-                            await client.send_message(dialog.id, message)
+                            await client.send_message(dialog.id, custom_message)
                         except Exception:
                             pass
                 await asyncio.sleep(interval)
 
-            active_bc_interval[user_id][tag] = False
-            await event.reply(f"⏰ jasebtime{group_number} otomatis berhenti setelah `{duration_str}`.")
+        except Exception as e:
+            await event.reply(f"❌ Error saat bctimergr: {e}")
+        finally:
+            active_bc_interval[user_id][f"timer_group{group_number}"] = False
 
-        asyncio.create_task(timed_jaseb_broadcast())
 
 
 
-    @client.on(events.NewMessage(pattern=r'^gal stopjasebtime(\d+)$'))
-    async def stop_jasebtime_group_handler(event):
-        group_number = event.pattern_match.group(1)
+    @client.on(events.NewMessage(pattern=r'^gal stoptimergr(\d+)$'))
+    async def stop_timer_group_handler(event):
         user_id = event.sender_id
-        tag = f"jasebtime{group_number}"
+        group_number = event.pattern_match.group(1)
 
-        if active_bc_interval[user_id].get(tag):
-            active_bc_interval[user_id][tag] = False
-            await event.reply(f"✅ jasebtime{group_number} dihentikan secara manual.")
+        key = f"timer_group{group_number}"
+        if active_bc_interval[user_id][key]:
+            active_bc_interval[user_id][key] = False
+            await event.reply(f"🛑 Broadcast timer ke grup {group_number} telah dihentikan secara manual.")
         else:
-            await event.reply(f"⚠️ Tidak ada jasebtime{group_number} yang aktif.")
+            await event.reply(f"⚠️ Tidak ada broadcast timer aktif untuk grup {group_number}.")
+
 
 
     # Hentikan broadcast grup
@@ -252,9 +257,9 @@ async def configure_event_handlers(client, user_id):
             "    Tambahkan grup/chat ke blacklist.\n"
             "8. gal unbl\n"
             "    Hapus grup/chat dari blacklist.\n"
-            "9. gal jasebtime[1-10] [interval] [durasi]\n"
+            "9. gal bctimgergr[1-10] [interval] [durasi]\n"
             "   Broadcast pesan tiap interval ke grup selama durasi tertentu.\n"
-            "10. gal stopjasebtime[1-10]\n"
+            "10. gal stopbctimergr[1-10]\n"
             "   Hentikan jasebtime tertentu.\n"
             "11. gal bcstarforwad[1-9]+ [interval] [durasi]\n"
             "   Forward pesan ke semua grup dengan interval dan durasi tertentu.\n"
